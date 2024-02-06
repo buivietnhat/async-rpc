@@ -1,7 +1,7 @@
 
 #pragma once
 
-//#define BOOST_ASIO_ENABLE_HANDLER_TRACKING 1
+// #define BOOST_ASIO_ENABLE_HANDLER_TRACKING 1
 
 #include <array>
 #include <boost/asio.hpp>
@@ -17,8 +17,6 @@
 #include "rpc/rpc.h"
 
 namespace rpc {
-
-// using ErrorCode = boost::system::error_code;
 
 class Socket {
  public:
@@ -41,10 +39,18 @@ class Acceptor {
   virtual void Close() = 0;
 };
 
+class Timer {
+ public:
+  using TimerCallback = std::function<void(Err)>;
+  virtual void Wait(TimerCallback cb) = 0;
+  virtual ~Timer() = default;
+};
+
 class IoContext {
  public:
   virtual void Run() = 0;
   virtual void Stop() = 0;
+  virtual std::unique_ptr<Timer> CreateTimer(int miliseconds) = 0;
   virtual ~IoContext() = default;
 };
 
@@ -66,7 +72,6 @@ class AsyncSocket : public Socket {
                         [cb = std::move(callback)](boost::system::error_code ec, size_t length) {
                           Err e = Err::OK;
                           if (ec) {
-                            //                            throw boost::system::system_error(ec);
                             e = Err::SEND_FAILURE;
                           }
 
@@ -154,6 +159,38 @@ class AsyncAcceptor : public Acceptor {
   std::unique_ptr<boost::asio::ip::tcp::acceptor> acceptor_;
 };
 
+class AsioTimer : public Timer {
+ public:
+  AsioTimer(boost::asio::io_context *ctx, int miliseconds) {
+    if (ctx == nullptr) {
+      throw std::runtime_error("asio timer: null ctx for constructor");
+    }
+
+    timer_ = std::make_unique<boost::asio::deadline_timer>(*ctx, boost::posix_time::milliseconds(miliseconds));
+  }
+
+  void Wait(TimerCallback cb) override {
+    timer_->async_wait([cb = std::move(cb)](const boost::system::error_code &error) {
+
+      if (error == boost::asio::error::operation_aborted) {
+        std::cout << "timer: operation aborted" << std::endl;
+        return;
+      }
+
+      Err e = Err::OK;
+      if (error) {
+        std::cout << "warning: error on callback for boost asio timer " << error.message() << std::endl;
+        e = Err::TIMER_FAILURE;
+      }
+
+      cb(e);
+    });
+  }
+
+ private:
+  std::unique_ptr<boost::asio::deadline_timer> timer_;
+};
+
 class AsioIoContext : public IoContext {
  public:
   AsioIoContext(std::unique_ptr<boost::asio::io_context> ctx) : ctx_(std::move(ctx)) {
@@ -162,7 +199,12 @@ class AsioIoContext : public IoContext {
     }
   }
   void Run() override { ctx_->run(); }
+
   void Stop() override { ctx_->stop(); }
+
+  std::unique_ptr<Timer> CreateTimer(int miliseconds) override {
+    return std::make_unique<AsioTimer>(ctx_.get(), miliseconds);
+  }
 
  private:
   std::unique_ptr<boost::asio::io_context> ctx_;

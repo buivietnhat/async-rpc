@@ -35,7 +35,6 @@ class MockSocket : public Socket {
 
     std::thread([&, cb = std::move(callback), buf] {
       std::unique_lock l(kBufferMu);
-      //    std::cout << "[" << id_ << "] sending message with size " << buf.size() << std::endl;
       kBuf[target_id_] = buf;
       kBufferCv.notify_all();
       cb(buf.size(), Err::OK);
@@ -50,12 +49,9 @@ class MockSocket : public Socket {
       Err e = Err::OK;
       if (finished_) {
         e = Err::CONNECTION_CLOSED;
-        //      closed = true;
-        //      return;
       }
 
       buf = std::move(kBuf[id_]);
-      //    std::cout << "[" << id_ << "] receive message with size " << buf.size() << std::endl;
 
       kBuf.erase(id_);
 
@@ -146,13 +142,16 @@ class MockIOContext : public IoContext {
   void Run() override {
     std::unique_lock l(mu_);
     cv_.wait(l, [&] { return finished_; });
-//    std::cout << "run finished" << std::endl;
   }
 
   void Stop() override {
     std::unique_lock l(mu_);
     finished_ = true;
     cv_.notify_all();
+  }
+
+  std::unique_ptr<Timer> CreateTimer(int miliseconds) override {
+    throw std::runtime_error("not implemented");
   }
 
  private:

@@ -29,7 +29,7 @@ class RpcClient : public std::enable_shared_from_this<RpcClient> {
     friend class RpcClient;
 
    public:
-    Caller(xid_t xid, Callback &&cb, ReplyExtractor &&re);
+    Caller(xid_t xid, Callback &&cb, ReplyExtractor &&re, std::unique_ptr<Timer> deadline_timer);
 
     void SetBuf(std::string &&buf) { buf_ = std::move(buf); }
 
@@ -43,6 +43,7 @@ class RpcClient : public std::enable_shared_from_this<RpcClient> {
     ReplyExtractor re_;
     mutex mu_;
     condition_variable cv_;
+    std::unique_ptr<Timer> timer_;
 
     std::string buf_;
   };
@@ -51,16 +52,17 @@ class RpcClient : public std::enable_shared_from_this<RpcClient> {
   RpcClient(std::unique_ptr<IoContext> ctx, std::unique_ptr<Socket> socket, std::string_view host,
             std::string_view port, int num_worker = RPC_DEFAULT_WORKERS, bool retrans = false);
 
+  void ConnectToServer();
+
   template <typename Args, typename Reply>
-  Err Call(proc_t proc, const Args &args, Callback cb) {
+  Err Call(proc_t proc, const Args &args, Callback cb, TimeOut to = kToMax) {
     Marshall m;
-    //    (m << ... << std::forward<Args>(args));
     m << args;
 
     Reply r;
     ReplyExtractor re(r);
 
-    return Call(proc, std::move(m), std::move(cb), std::move(re));
+    return Call(proc, std::move(m), std::move(cb), std::move(re), to);
   }
 
   void WaitUntilConnected() {
@@ -71,8 +73,6 @@ class RpcClient : public std::enable_shared_from_this<RpcClient> {
   }
 
   ~RpcClient() {
-    //    finished_ = true;
-
     socket_->Close();
     ctx_->Stop();
     for (auto &&w : workers_) {
@@ -81,17 +81,8 @@ class RpcClient : public std::enable_shared_from_this<RpcClient> {
   }
 
  private:
-  //  Err Call(proc_t proc, Marshall &&req, Callback &&cb, ReplyExtractor &&re) {
-  //    auto err = Call(proc, std::move(req), std::move(cb), std::move(re));
-  //    if (err != OK) {
-  //      return err;
-  //    }
-  //
-  //    //    u >> reply;
-  //    return err;
-  //  }
 
-  Err Call(proc_t proc, Marshall &&req, Callback &&cb, ReplyExtractor &&re);
+  Err Call(proc_t proc, Marshall &&req, Callback &&cb, ReplyExtractor &&re, TimeOut to);
 
   void OnConnected() {
     std::cout << "connected to server" << std::endl;
@@ -102,6 +93,25 @@ class RpcClient : public std::enable_shared_from_this<RpcClient> {
     }
 
     ListenFromServer();
+  }
+
+  void OnTimerExpired(Caller *c, Err e) {
+    if (c == nullptr) {
+      return;
+    }
+
+    if (e != Err::OK) {
+      // TODO(nhat): maybe need fire another timer here
+      std::cout << "warning: err on callback of timer" << std::endl;
+    }
+
+    std::unique_lock l(c->mu_);
+    if (!c->done_) {
+      c->done_ = true;
+      c->err_ = Err::TIMEOUT_FAILURE;
+      c->cb_({}, c->err_);
+      std::cout << "Timeout waiting for reply for xid " << c->xid_ << std::endl;
+    }
   }
 
   void OnSendFinished(xid_t xid, size_t n, Err e) {
@@ -118,9 +128,13 @@ class RpcClient : public std::enable_shared_from_this<RpcClient> {
         return;
       }
 
-      std::unique_lock l(c->mu_);
-      c->done_ = true;
-      c->err_ = e;
+      {
+        std::unique_lock l(c->mu_);
+        c->done_ = true;
+        c->err_ = e;
+      }
+
+      c->cb_({}, e);
     }
 
     ListenFromServer();
@@ -129,7 +143,6 @@ class RpcClient : public std::enable_shared_from_this<RpcClient> {
   void OnReceiveFinished(std::shared_ptr<std::string> data, size_t n, Err e) {
     if (e == Err::CONNECTION_CLOSED) {
       std::cout << "connection was closed by the server ..." << std::endl;
-      //      socket->Close();
       return;
     }
 
@@ -158,10 +171,12 @@ class RpcClient : public std::enable_shared_from_this<RpcClient> {
   //  [[maybe_unused]] std::list<xid_t> xid_rep_window_;
 
   std::unique_ptr<Socket> socket_;
-  //  std::thread listen_thread_;
+  std::string host_;
+  std::string port_;
 
   std::unique_ptr<IoContext> ctx_;
   std::vector<std::thread> workers_;
+  int num_worker_ = RPC_DEFAULT_WORKERS;
   //  std::atomic<bool> finished_ = false;
 
   mutex connected_mu_;

@@ -33,7 +33,8 @@ enum class Err : uint8_t {
   CONNECTION_CLOSED,
   ACCEPT_FAILURE,
   CONNECT_FAILURE,
-  CANCEL
+  CANCEL,
+  TIMER_FAILURE,
 };
 
 inline std::string ToString(Err err) {
@@ -67,7 +68,7 @@ struct TimeOut {
   int to_;
 };
 
-static constexpr TimeOut kToMax = {120000};
+static constexpr TimeOut kToMax = {12000};
 static constexpr TimeOut kToMin = {1000};
 
 static constexpr xid_t BIND = 1000;
