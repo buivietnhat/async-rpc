@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 20)
 if (NOT SANITIZER)
     set(SANITIZER address)
 endif ()
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -ggdb -fno-omit-frame-pointer -fno-optimize-sibling-calls")
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0 -ggdb -fno-omit-frame-pointer -fno-optimize-sibling-calls -fsanitize=address")
 
 
 find_package(Boost REQUIRED)

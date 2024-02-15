@@ -35,6 +35,9 @@ enum class Err : uint8_t {
   CONNECT_FAILURE,
   CANCEL,
   TIMER_FAILURE,
+  BROKEN_PIPE,
+  CONNECTION_RESET,
+  CONNECTION_ABORTED,
 };
 
 inline std::string ToString(Err err) {
@@ -59,13 +62,29 @@ inline std::string ToString(Err err) {
       return "CONNECTION_CLOSED";
     case Err::ACCEPT_FAILURE:
       return "ACCEPT_FAILURE";
+    case Err::UNMARSHALL_ARGS_FAILURE:
+      return "UNMARSHALL_ARGS_FAILURE";
+    case Err::OLDSERVER_FAILURE:
+      return "OLDSERVER_FAILURE";
+    case Err::CONNECT_FAILURE:
+      return "CONNECT_FAILURE";
+    case Err::CANCEL:
+      return "CANCEL";
+    case Err::TIMER_FAILURE:
+      return "TIMER_FAILURE";
+    case Err::BROKEN_PIPE:
+      return "BROKEN_PIPE";
+    case Err::CONNECTION_RESET:
+      return "CONNECTION_RESET";
+    case Err::CONNECTION_ABORTED:
+      return "CONNECTION_ABORTED";
     default:
       return "";
   }
 }
 
 struct TimeOut {
-  int to_;
+  int ms_;
 };
 
 static constexpr TimeOut kToMax = {12000};

@@ -44,7 +44,6 @@ class RpcClient : public std::enable_shared_from_this<RpcClient> {
     mutex mu_;
     condition_variable cv_;
     std::unique_ptr<Timer> timer_;
-
     std::string buf_;
   };
 
@@ -72,6 +71,13 @@ class RpcClient : public std::enable_shared_from_this<RpcClient> {
     }
   }
 
+  Err Bind(TimeOut to = kToMax);
+
+  bool HasBinded() const {
+    std::lock_guard l(callers_mu_);
+    return bind_done_;
+  }
+
   ~RpcClient() {
     socket_->Close();
     ctx_->Stop();
@@ -81,94 +87,33 @@ class RpcClient : public std::enable_shared_from_this<RpcClient> {
   }
 
  private:
-
   Err Call(proc_t proc, Marshall &&req, Callback &&cb, ReplyExtractor &&re, TimeOut to);
 
-  void OnConnected() {
-    std::cout << "connected to server" << std::endl;
-    {
-      std::unique_lock l(connected_mu_);
-      connected_ = true;
-      connected_cv_.notify_all();
-    }
+  void UpdateXidRep(xid_t xid);
 
-    ListenFromServer();
-  }
+  void OnConnected();
 
-  void OnTimerExpired(Caller *c, Err e) {
-    if (c == nullptr) {
-      return;
-    }
+  void OnTimerExpired(Caller *c, Err e);
 
-    if (e != Err::OK) {
-      // TODO(nhat): maybe need fire another timer here
-      std::cout << "warning: err on callback of timer" << std::endl;
-    }
+  void OnSendFinished(xid_t xid, size_t n, Err e);
 
-    std::unique_lock l(c->mu_);
-    if (!c->done_) {
-      c->done_ = true;
-      c->err_ = Err::TIMEOUT_FAILURE;
-      c->cb_({}, c->err_);
-      std::cout << "Timeout waiting for reply for xid " << c->xid_ << std::endl;
-    }
-  }
-
-  void OnSendFinished(xid_t xid, size_t n, Err e) {
-    if (e != Err::OK) {
-      auto *c = [&]() mutable -> Caller * {
-        std::unique_lock l(callers_mu_);
-        if (callers_.contains(xid)) {
-          return callers_[xid].get();
-        }
-        return nullptr;
-      }();
-
-      if (!c) {
-        return;
-      }
-
-      {
-        std::unique_lock l(c->mu_);
-        c->done_ = true;
-        c->err_ = e;
-      }
-
-      c->cb_({}, e);
-    }
-
-    ListenFromServer();
-  }
-
-  void OnReceiveFinished(std::shared_ptr<std::string> data, size_t n, Err e) {
-    if (e == Err::CONNECTION_CLOSED) {
-      std::cout << "connection was closed by the server ..." << std::endl;
-      return;
-    }
-
-    if (e != Err::OK) {
-      std::cout << "got an error " << ToString(e) << "while attempting to receive msg froms server";
-      return;
-    }
-
-    data->resize(n);
-    std::cout << "client rep buf: " << *data << std::endl;
-    GotPdu(std::move(*data));
-  }
+  void OnReceiveFinished(std::shared_ptr<std::string> data, size_t n, Err e);
 
   void ListenFromServer();
 
   void GotPdu(std::string &&buf);
 
-  Err Bind(TimeOut to = kToMax);
-
   mutable mutex callers_mu_;
   xid_t xid_ = 2;
   std::unordered_map<xid_t, std::unique_ptr<Caller>> callers_;
 
+
   uint32_t clt_nonce_ = 0;
   uint32_t srv_nonce_ = 0;
-  //  [[maybe_unused]] std::list<xid_t> xid_rep_window_;
+  bool bind_done_ = false;
+
+  mutex rep_window_mu_;
+  std::list<xid_t> xid_rep_window_;
 
   std::unique_ptr<Socket> socket_;
   std::string host_;
@@ -177,7 +122,6 @@ class RpcClient : public std::enable_shared_from_this<RpcClient> {
   std::unique_ptr<IoContext> ctx_;
   std::vector<std::thread> workers_;
   int num_worker_ = RPC_DEFAULT_WORKERS;
-  //  std::atomic<bool> finished_ = false;
 
   mutex connected_mu_;
   std::condition_variable connected_cv_;

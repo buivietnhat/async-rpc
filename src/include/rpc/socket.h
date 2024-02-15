@@ -71,7 +71,9 @@ class AsyncSocket : public Socket {
     socket_->async_send(boost::asio::buffer(buf),
                         [cb = std::move(callback)](boost::system::error_code ec, size_t length) {
                           Err e = Err::OK;
-                          if (ec) {
+                          if (ec == boost::asio::error::broken_pipe) {
+                            e = Err::BROKEN_PIPE;
+                          } else if (ec) {
                             e = Err::SEND_FAILURE;
                           }
 
@@ -99,9 +101,12 @@ class AsyncSocket : public Socket {
                                if (ec == boost::asio::error::eof) {
                                  // connection closed cleanly by peer
                                  e = Err::CONNECTION_CLOSED;
+                               } else if (ec == boost::asio::error::broken_pipe) {
+                                 e = Err::BROKEN_PIPE;
                                } else if (ec) {
                                  e = Err::RECEIVE_FAILURE;
                                }
+
                                cb(length, e);
                              });
   }
@@ -171,7 +176,6 @@ class AsioTimer : public Timer {
 
   void Wait(TimerCallback cb) override {
     timer_->async_wait([cb = std::move(cb)](const boost::system::error_code &error) {
-
       if (error == boost::asio::error::operation_aborted) {
         std::cout << "timer: operation aborted" << std::endl;
         return;
